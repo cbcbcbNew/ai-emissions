@@ -6,7 +6,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Event listeners
     document.getElementById('refreshBtn').addEventListener('click', loadStats);
     document.getElementById('resetBtn').addEventListener('click', resetStats);
-    // Removed viewToggle listener
+    
+    // Listen for storage changes to auto-refresh the popup
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes.aiUsageStats) {
+            console.log('Popup: Storage changed, refreshing stats...');
+            // Small delay to ensure the storage update is complete
+            setTimeout(loadStats, 100);
+        }
+    });
 });
 
 // Load and display statistics
@@ -17,6 +25,8 @@ function loadStats() {
     loadingEl.style.display = 'block';
     contentEl.style.display = 'none';
     
+    console.log('Popup: Loading stats...');
+    
     // Get AI tools list and detailed stats
     Promise.all([
         sendMessage({ action: 'getAITools' }),
@@ -24,6 +34,8 @@ function loadStats() {
     ]).then(([toolsResponse, statsResponse]) => {
         const tools = toolsResponse.tools;
         const stats = statsResponse.stats || {};
+        
+        console.log('Popup: Received stats:', stats);
         
         displayStats(tools, stats);
         

@@ -34,9 +34,14 @@ const debouncedSendUsageData = (tool, data) => {
     clearTimeout(debounceTimers[tool]);
   }
   
+  // Send immediate update for first query to ensure popup shows it right away
+  if (data.queries === 1) {
+    sendUsageData(tool, data);
+  }
+  
   debounceTimers[tool] = setTimeout(() => {
     sendUsageData(tool, data);
-  }, 1000); // 1 second debounce
+  }, 500); // Reduced from 1000ms to 500ms for faster updates
 };
 
 // Send usage data to background script
