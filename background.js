@@ -111,6 +111,8 @@ function incrementVisit(toolKey) {
 
 // Update usage statistics from content script with incremental updates
 function updateUsageStats(toolKey, usageData) {
+  console.log(`Background: Received usage data for ${toolKey}:`, usageData);
+  
   chrome.storage.local.get(['aiUsageStats'], (result) => {
     const stats = result.aiUsageStats || {};
     
@@ -130,16 +132,32 @@ function updateUsageStats(toolKey, usageData) {
     // Use incremental updates instead of replacing values
     // This prevents data loss when multiple content scripts send data
     if (usageData.queries !== undefined) {
+      const oldQueries = stats[toolKey].queries;
       stats[toolKey].queries = Math.max(stats[toolKey].queries, usageData.queries);
+      if (stats[toolKey].queries !== oldQueries) {
+        console.log(`Background: Updated queries for ${toolKey}: ${oldQueries} -> ${stats[toolKey].queries}`);
+      }
     }
     if (usageData.inputTokens !== undefined) {
+      const oldInputTokens = stats[toolKey].inputTokens;
       stats[toolKey].inputTokens = Math.max(stats[toolKey].inputTokens, usageData.inputTokens);
+      if (stats[toolKey].inputTokens !== oldInputTokens) {
+        console.log(`Background: Updated input tokens for ${toolKey}: ${oldInputTokens} -> ${stats[toolKey].inputTokens}`);
+      }
     }
     if (usageData.outputTokens !== undefined) {
+      const oldOutputTokens = stats[toolKey].outputTokens;
       stats[toolKey].outputTokens = Math.max(stats[toolKey].outputTokens, usageData.outputTokens);
+      if (stats[toolKey].outputTokens !== oldOutputTokens) {
+        console.log(`Background: Updated output tokens for ${toolKey}: ${oldOutputTokens} -> ${stats[toolKey].outputTokens}`);
+      }
     }
     if (usageData.images !== undefined) {
+      const oldImages = stats[toolKey].images;
       stats[toolKey].images = Math.max(stats[toolKey].images, usageData.images);
+      if (stats[toolKey].images !== oldImages) {
+        console.log(`Background: Updated images for ${toolKey}: ${oldImages} -> ${stats[toolKey].images}`);
+      }
     }
     
     stats[toolKey].lastUsed = usageData.timestamp || Date.now();
@@ -178,10 +196,18 @@ function updateUsageStats(toolKey, usageData) {
         if (stats[toolKey].sessions.length > 100) {
           stats[toolKey].sessions = stats[toolKey].sessions.slice(-100);
         }
+        console.log(`Background: Added new session for ${toolKey}:`, sessionData);
       }
     }
     
-    chrome.storage.local.set({ aiUsageStats: stats });
+    chrome.storage.local.set({ aiUsageStats: stats }, () => {
+      console.log(`Background: Successfully saved stats for ${toolKey}:`, {
+        queries: stats[toolKey].queries,
+        inputTokens: stats[toolKey].inputTokens,
+        outputTokens: stats[toolKey].outputTokens,
+        images: stats[toolKey].images
+      });
+    });
     
     console.log(`AI Tool usage updated: ${AI_TOOLS[toolKey]?.name || toolKey}`, {
       queries: stats[toolKey].queries,
@@ -235,6 +261,8 @@ function getDailyStats(toolKey, days = 7) {
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Background: Received message:', request);
+  
   // Handle tool detection from content script
   if (request.action === 'toolDetected') {
     console.log(`AI Tool detected: ${request.tool} on ${request.url}`);
@@ -243,19 +271,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   // Handle usage tracking from content script
   if (request.action === 'usageTracked') {
+    console.log(`Background: Processing usage data for ${request.tool}`);
     updateUsageStats(request.tool, request.data);
     return;
   }
   
   // Handle requests from popup
   if (request.action === 'getStats') {
+    console.log('Background: Popup requested stats');
     chrome.storage.local.get(['aiUsageStats'], (result) => {
+      console.log('Background: Sending stats to popup:', result.aiUsageStats);
       sendResponse({ stats: result.aiUsageStats || {} });
     });
     return true; // Keep message channel open for async response
   }
   
   if (request.action === 'getDetailedStats') {
+    console.log('Background: Popup requested detailed stats');
     chrome.storage.local.get(['aiUsageStats'], async (result) => {
       const stats = result.aiUsageStats || {};
       const detailedStats = {};
@@ -271,12 +303,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         };
       }
       
+      console.log('Background: Sending detailed stats to popup:', detailedStats);
       sendResponse({ stats: detailedStats });
     });
     return true;
   }
   
   if (request.action === 'resetStats') {
+    console.log('Background: Resetting all stats');
     const resetStats = {};
     Object.keys(AI_TOOLS).forEach(key => {
       resetStats[key] = {
@@ -291,12 +325,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       };
     });
     chrome.storage.local.set({ aiUsageStats: resetStats }, () => {
+      console.log('Background: Stats reset successfully');
       sendResponse({ success: true });
     });
     return true;
   }
   
   if (request.action === 'resetTool') {
+    console.log(`Background: Resetting stats for tool: ${request.tool}`);
     const toolKey = request.tool;
     chrome.storage.local.get(['aiUsageStats'], (result) => {
       const stats = result.aiUsageStats || {};
@@ -311,6 +347,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sessions: []
       };
       chrome.storage.local.set({ aiUsageStats: stats }, () => {
+        console.log(`Background: Stats reset for ${toolKey}`);
         sendResponse({ success: true });
       });
     });
@@ -318,11 +355,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'getAITools') {
+    console.log('Background: Sending AI tools list');
     sendResponse({ tools: AI_TOOLS });
     return true;
   }
   
   if (request.action === 'exportData') {
+    console.log('Background: Exporting data');
     chrome.storage.local.get(['aiUsageStats'], (result) => {
       const exportData = {
         exportDate: new Date().toISOString(),

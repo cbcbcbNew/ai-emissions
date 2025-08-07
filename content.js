@@ -68,11 +68,24 @@ const markElementProcessed = (element) => {
 
 // ChatGPT specific monitoring
 const monitorChatGPT = () => {
+  console.log('Setting up ChatGPT monitoring...');
+  
+  // Try multiple selectors for the chat container
   const chatContainer = document.querySelector('[data-testid="conversation-turn-0"]')?.parentElement ||
                        document.querySelector('.flex.flex-col.text-sm') ||
-                       document.querySelector('[role="main"]');
+                       document.querySelector('[role="main"]') ||
+                       document.querySelector('[data-testid="conversation-container"]') ||
+                       document.querySelector('.conversation-container') ||
+                       document.querySelector('main');
   
-  if (!chatContainer) return;
+  if (!chatContainer) {
+    console.log('ChatGPT: No chat container found, trying alternative approach...');
+    // Fallback: monitor the entire document for ChatGPT-specific elements
+    monitorChatGPTFallback();
+    return;
+  }
+
+  console.log('ChatGPT: Chat container found:', chatContainer);
 
   const observer = new MutationObserver((mutations) => {
     let hasChanges = false;
@@ -80,32 +93,39 @@ const monitorChatGPT = () => {
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          // Check for new messages
-          const messageElements = node.querySelectorAll('[data-message-author-role]');
+          // Check for new messages with multiple selector strategies
+          const messageElements = node.querySelectorAll('[data-message-author-role], [data-testid*="message"], .message, .chat-message');
           messageElements.forEach((element) => {
             if (isElementProcessed(element)) return;
             
-            const role = element.getAttribute('data-message-author-role');
+            const role = element.getAttribute('data-message-author-role') || 
+                        element.getAttribute('data-testid')?.includes('user') ? 'user' : 
+                        element.getAttribute('data-testid')?.includes('assistant') ? 'assistant' : null;
             const text = element.textContent || '';
+            
+            console.log('ChatGPT: Found message element:', { role, text: text.substring(0, 50), element });
             
             // Only count user queries when the role is 'user'
             if (role === 'user' && text.trim()) {
               queryCounters.chatgpt++;
               tokenCounters.chatgpt.input += estimateTokens(text);
               hasChanges = true;
+              console.log('ChatGPT: User query detected:', { queries: queryCounters.chatgpt, tokens: tokenCounters.chatgpt.input });
             } else if (role === 'assistant' && text.trim()) {
               tokenCounters.chatgpt.output += estimateTokens(text);
               hasChanges = true;
+              console.log('ChatGPT: Assistant response detected:', { tokens: tokenCounters.chatgpt.output });
             }
             
             markElementProcessed(element);
           });
 
           // Check for generated images more specifically
-          const images = node.querySelectorAll('[data-message-author-role="assistant"] img[alt*="generated"], [data-message-author-role="assistant"] img[src*="dalle"]');
+          const images = node.querySelectorAll('[data-message-author-role="assistant"] img[alt*="generated"], [data-message-author-role="assistant"] img[src*="dalle"], img[alt*="generated"], img[src*="dalle"]');
           if (images.length > 0) {
             imageCounters.chatgpt += images.length;
             hasChanges = true;
+            console.log('ChatGPT: Generated images detected:', { images: imageCounters.chatgpt });
           }
         }
       });
@@ -113,6 +133,12 @@ const monitorChatGPT = () => {
     
     // Only send update if there were actual changes
     if (hasChanges) {
+      console.log('ChatGPT: Sending usage update:', {
+        queries: queryCounters.chatgpt,
+        inputTokens: tokenCounters.chatgpt.input,
+        outputTokens: tokenCounters.chatgpt.output,
+        images: imageCounters.chatgpt
+      });
       debouncedSendUsageData('chatgpt', {
         queries: queryCounters.chatgpt,
         inputTokens: tokenCounters.chatgpt.input,
@@ -124,6 +150,95 @@ const monitorChatGPT = () => {
 
   observer.observe(chatContainer, { childList: true, subtree: true });
   observers.push(observer);
+  
+  // Also monitor form submissions specifically for ChatGPT
+  monitorChatGPTFormSubmissions();
+};
+
+// Fallback monitoring for ChatGPT
+const monitorChatGPTFallback = () => {
+  console.log('ChatGPT: Using fallback monitoring...');
+  
+  // Monitor the entire document for any ChatGPT-related elements
+  const observer = new MutationObserver((mutations) => {
+    let hasChanges = false;
+    
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          // Look for any elements that might contain user messages
+          const potentialUserMessages = node.querySelectorAll('[data-testid*="user"], [class*="user"], [class*="message"], [role="textbox"]');
+          
+          potentialUserMessages.forEach((element) => {
+            if (isElementProcessed(element)) return;
+            
+            const text = element.textContent || '';
+            // Only count if it looks like a user message (not empty, not just whitespace)
+            if (text.trim() && text.length > 1 && !text.includes('ChatGPT') && !text.includes('Assistant')) {
+              queryCounters.chatgpt++;
+              tokenCounters.chatgpt.input += estimateTokens(text);
+              hasChanges = true;
+              console.log('ChatGPT Fallback: User message detected:', { text: text.substring(0, 50), queries: queryCounters.chatgpt });
+              markElementProcessed(element);
+            }
+          });
+        }
+      });
+    });
+    
+    if (hasChanges) {
+      debouncedSendUsageData('chatgpt', {
+        queries: queryCounters.chatgpt,
+        inputTokens: tokenCounters.chatgpt.input,
+        outputTokens: tokenCounters.chatgpt.output,
+        images: imageCounters.chatgpt
+      });
+    }
+  });
+  
+  observer.observe(document.body, { childList: true, subtree: true });
+  observers.push(observer);
+};
+
+// Monitor ChatGPT form submissions specifically
+const monitorChatGPTFormSubmissions = () => {
+  // Monitor for the ChatGPT input form
+  const inputForm = document.querySelector('form[data-testid="send-button-form"]') ||
+                   document.querySelector('form[role="search"]') ||
+                   document.querySelector('form');
+  
+  if (inputForm) {
+    console.log('ChatGPT: Found input form, monitoring submissions...');
+    
+    inputForm.addEventListener('submit', (event) => {
+      const textarea = inputForm.querySelector('textarea, input[type="text"], [contenteditable="true"]');
+      if (textarea) {
+        const text = textarea.value || textarea.textContent || '';
+        if (text.trim()) {
+          queryCounters.chatgpt++;
+          tokenCounters.chatgpt.input += estimateTokens(text);
+          console.log('ChatGPT Form: Query submitted:', { text: text.substring(0, 50), queries: queryCounters.chatgpt });
+          sendUsageData('chatgpt', { queries: queryCounters.chatgpt, inputTokens: tokenCounters.chatgpt.input });
+        }
+      }
+    });
+  }
+  
+  // Also monitor for Enter key presses in textareas
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      const target = event.target;
+      if (target.tagName === 'TEXTAREA' || target.getAttribute('contenteditable') === 'true') {
+        const text = target.value || target.textContent || '';
+        if (text.trim() && window.location.hostname.includes('chat.openai.com')) {
+          queryCounters.chatgpt++;
+          tokenCounters.chatgpt.input += estimateTokens(text);
+          console.log('ChatGPT Keydown: Query submitted:', { text: text.substring(0, 50), queries: queryCounters.chatgpt });
+          sendUsageData('chatgpt', { queries: queryCounters.chatgpt, inputTokens: tokenCounters.chatgpt.input });
+        }
+      }
+    }
+  });
 };
 
 // Claude specific monitoring
