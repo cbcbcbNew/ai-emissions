@@ -109,7 +109,7 @@ function incrementVisit(toolKey) {
   });
 }
 
-// Update usage statistics from content script
+// Update usage statistics from content script with incremental updates
 function updateUsageStats(toolKey, usageData) {
   chrome.storage.local.get(['aiUsageStats'], (result) => {
     const stats = result.aiUsageStats || {};
@@ -127,35 +127,57 @@ function updateUsageStats(toolKey, usageData) {
       };
     }
     
-    // Update counters with new data
-    stats[toolKey].queries = usageData.queries || stats[toolKey].queries;
-    stats[toolKey].inputTokens = usageData.inputTokens || stats[toolKey].inputTokens;
-    stats[toolKey].outputTokens = usageData.outputTokens || stats[toolKey].outputTokens;
-    stats[toolKey].images = usageData.images || stats[toolKey].images;
+    // Use incremental updates instead of replacing values
+    // This prevents data loss when multiple content scripts send data
+    if (usageData.queries !== undefined) {
+      stats[toolKey].queries = Math.max(stats[toolKey].queries, usageData.queries);
+    }
+    if (usageData.inputTokens !== undefined) {
+      stats[toolKey].inputTokens = Math.max(stats[toolKey].inputTokens, usageData.inputTokens);
+    }
+    if (usageData.outputTokens !== undefined) {
+      stats[toolKey].outputTokens = Math.max(stats[toolKey].outputTokens, usageData.outputTokens);
+    }
+    if (usageData.images !== undefined) {
+      stats[toolKey].images = Math.max(stats[toolKey].images, usageData.images);
+    }
+    
     stats[toolKey].lastUsed = usageData.timestamp || Date.now();
     
     if (!stats[toolKey].firstUsed) {
       stats[toolKey].firstUsed = usageData.timestamp || Date.now();
     }
     
-    // Store session data (optional - for detailed analytics)
-    if (usageData.queries > 0) {
+    // Store session data for detailed analytics
+    if (usageData.queries > 0 || usageData.inputTokens > 0 || usageData.outputTokens > 0 || usageData.images > 0) {
       const sessionData = {
-        timestamp: usageData.timestamp,
-        queries: usageData.queries,
-        inputTokens: usageData.inputTokens,
-        outputTokens: usageData.outputTokens,
-        images: usageData.images,
-        url: usageData.url
+        timestamp: usageData.timestamp || Date.now(),
+        queries: usageData.queries || 0,
+        inputTokens: usageData.inputTokens || 0,
+        outputTokens: usageData.outputTokens || 0,
+        images: usageData.images || 0,
+        url: usageData.url || ''
       };
       
       // Keep only last 100 sessions to prevent excessive storage
       if (!stats[toolKey].sessions) {
         stats[toolKey].sessions = [];
       }
-      stats[toolKey].sessions.push(sessionData);
-      if (stats[toolKey].sessions.length > 100) {
-        stats[toolKey].sessions = stats[toolKey].sessions.slice(-100);
+      
+      // Check if this session data is significantly different from the last one
+      const lastSession = stats[toolKey].sessions[stats[toolKey].sessions.length - 1];
+      const isNewSession = !lastSession || 
+        Math.abs(lastSession.timestamp - sessionData.timestamp) > 60000 || // 1 minute gap
+        lastSession.queries !== sessionData.queries ||
+        lastSession.inputTokens !== sessionData.inputTokens ||
+        lastSession.outputTokens !== sessionData.outputTokens ||
+        lastSession.images !== sessionData.images;
+      
+      if (isNewSession) {
+        stats[toolKey].sessions.push(sessionData);
+        if (stats[toolKey].sessions.length > 100) {
+          stats[toolKey].sessions = stats[toolKey].sessions.slice(-100);
+        }
       }
     }
     

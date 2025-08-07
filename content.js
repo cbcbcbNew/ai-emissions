@@ -6,10 +6,12 @@ let observers = [];
 let queryCounters = {};
 let tokenCounters = {};
 let imageCounters = {};
+let processedElements = new Set(); // Track processed elements to prevent double counting
+let debounceTimers = {}; // Debounce usage data sending
 
 // Initialize counters for each tool
 const initializeCounters = () => {
-  const tools = ['chatgpt', 'claude', 'bard', 'copilot', 'perplexity', 'character', 'huggingface']; // Include all AI_TOOLS from background.js
+  const tools = ['chatgpt', 'claude', 'bard', 'copilot', 'perplexity', 'character', 'huggingface'];
   tools.forEach(tool => {
     queryCounters[tool] = 0;
     tokenCounters[tool] = { input: 0, output: 0 };
@@ -24,6 +26,17 @@ const estimateTokens = (text) => {
   if (!text) return 0;
   // Rough estimation: 1 token ≈ 4 characters for English text
   return Math.ceil(text.length / 4);
+};
+
+// Debounced function to send usage data
+const debouncedSendUsageData = (tool, data) => {
+  if (debounceTimers[tool]) {
+    clearTimeout(debounceTimers[tool]);
+  }
+  
+  debounceTimers[tool] = setTimeout(() => {
+    sendUsageData(tool, data);
+  }, 1000); // 1 second debounce
 };
 
 // Send usage data to background script
@@ -42,6 +55,17 @@ const sendUsageData = (tool, data) => {
   });
 };
 
+// Helper function to check if element was already processed
+const isElementProcessed = (element) => {
+  return processedElements.has(element) || element.dataset.processed === 'true';
+};
+
+// Helper function to mark element as processed
+const markElementProcessed = (element) => {
+  processedElements.add(element);
+  element.dataset.processed = 'true';
+};
+
 // ChatGPT specific monitoring
 const monitorChatGPT = () => {
   const chatContainer = document.querySelector('[data-testid="conversation-turn-0"]')?.parentElement ||
@@ -51,12 +75,16 @@ const monitorChatGPT = () => {
   if (!chatContainer) return;
 
   const observer = new MutationObserver((mutations) => {
+    let hasChanges = false;
+    
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
           // Check for new messages
           const messageElements = node.querySelectorAll('[data-message-author-role]');
           messageElements.forEach((element) => {
+            if (isElementProcessed(element)) return;
+            
             const role = element.getAttribute('data-message-author-role');
             const text = element.textContent || '';
             
@@ -64,28 +92,34 @@ const monitorChatGPT = () => {
             if (role === 'user' && text.trim()) {
               queryCounters.chatgpt++;
               tokenCounters.chatgpt.input += estimateTokens(text);
+              hasChanges = true;
             } else if (role === 'assistant' && text.trim()) {
               tokenCounters.chatgpt.output += estimateTokens(text);
+              hasChanges = true;
             }
+            
+            markElementProcessed(element);
           });
 
           // Check for generated images more specifically
-          // Look for image elements within assistant messages that might indicate generation
           const images = node.querySelectorAll('[data-message-author-role="assistant"] img[alt*="generated"], [data-message-author-role="assistant"] img[src*="dalle"]');
           if (images.length > 0) {
             imageCounters.chatgpt += images.length;
+            hasChanges = true;
           }
-
-          // Send update if counters changed
-          sendUsageData('chatgpt', {
-            queries: queryCounters.chatgpt,
-            inputTokens: tokenCounters.chatgpt.input,
-            outputTokens: tokenCounters.chatgpt.output,
-            images: imageCounters.chatgpt
-          });
         }
       });
     });
+    
+    // Only send update if there were actual changes
+    if (hasChanges) {
+      debouncedSendUsageData('chatgpt', {
+        queries: queryCounters.chatgpt,
+        inputTokens: tokenCounters.chatgpt.input,
+        outputTokens: tokenCounters.chatgpt.output,
+        images: imageCounters.chatgpt
+      });
+    }
   });
 
   observer.observe(chatContainer, { childList: true, subtree: true });
@@ -101,48 +135,50 @@ const monitorClaude = () => {
   if (!chatContainer) return;
 
   const observer = new MutationObserver((mutations) => {
+    let hasChanges = false;
+    
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          // Claude messages are often identified by their parent structure or specific classes.
-          // Look for user messages and assistant responses within the chat container.
-
           // User messages often have a distinct parent or data attribute
           const userMessages = node.querySelectorAll('.text-message.user-message-container, [data-testid^="user-message"]');
           userMessages.forEach((element) => {
-              const text = element.textContent || '';
-              if (text.trim() && !element.dataset.processed) { // Prevent double counting
-                  queryCounters.claude++;
-                  tokenCounters.claude.input += estimateTokens(text);
-                  element.dataset.processed = 'true'; // Mark as processed
-              }
+            if (isElementProcessed(element)) return;
+            
+            const text = element.textContent || '';
+            if (text.trim()) {
+              queryCounters.claude++;
+              tokenCounters.claude.input += estimateTokens(text);
+              hasChanges = true;
+              markElementProcessed(element);
+            }
           });
 
           // Assistant responses usually follow a different structure
           const assistantMessages = node.querySelectorAll('.text-message.assistant-message-container, [data-testid^="assistant-message"]');
           assistantMessages.forEach((element) => {
-              const text = element.textContent || '';
-              if (text.trim() && !element.dataset.processed) { // Prevent double counting
-                  tokenCounters.claude.output += estimateTokens(text);
-                  element.dataset.processed = 'true';
-              }
-          });
-
-          // Re-evaluate image detection for Claude - they don't natively generate images like DALL-E, 
-          // but might display images from uploaded files or external sources.
-          // For now, removing specific image counting until a clear pattern emerges.
-          // If Claude introduces image generation, we'd need specific selectors for that.
-          
-          // Send update
-          sendUsageData('claude', {
-            queries: queryCounters.claude,
-            inputTokens: tokenCounters.claude.input,
-            outputTokens: tokenCounters.claude.output,
-            images: imageCounters.claude // Will remain 0 unless Claude adds native image generation
+            if (isElementProcessed(element)) return;
+            
+            const text = element.textContent || '';
+            if (text.trim()) {
+              tokenCounters.claude.output += estimateTokens(text);
+              hasChanges = true;
+              markElementProcessed(element);
+            }
           });
         }
       });
     });
+    
+    // Only send update if there were actual changes
+    if (hasChanges) {
+      debouncedSendUsageData('claude', {
+        queries: queryCounters.claude,
+        inputTokens: tokenCounters.claude.input,
+        outputTokens: tokenCounters.claude.output,
+        images: imageCounters.claude
+      });
+    }
   });
 
   observer.observe(chatContainer, { childList: true, subtree: true });
@@ -158,49 +194,59 @@ const monitorBard = () => {
   if (!chatContainer) return;
 
   const observer = new MutationObserver((mutations) => {
+    let hasChanges = false;
+    
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
           // Check for user queries
-          const userInputs = node.querySelectorAll('.user-query-text, [data-test-id="user-query-text"]'); // More specific selector
+          const userInputs = node.querySelectorAll('.user-query-text, [data-test-id="user-query-text"]');
           
           userInputs.forEach((element) => {
+            if (isElementProcessed(element)) return;
+            
             const text = element.textContent || '';
-            if (text.trim() && !element.dataset.processed) {
+            if (text.trim()) {
               queryCounters.bard++;
               tokenCounters.bard.input += estimateTokens(text);
-              element.dataset.processed = 'true';
+              hasChanges = true;
+              markElementProcessed(element);
             }
           });
 
           // Check for responses
-          const responses = node.querySelectorAll('.model-response-text, [data-test-id="model-response-text"]'); // More specific selector
+          const responses = node.querySelectorAll('.model-response-text, [data-test-id="model-response-text"]');
           
           responses.forEach((element) => {
+            if (isElementProcessed(element)) return;
+            
             const text = element.textContent || '';
-            if (text.trim() && !element.dataset.processed) {
+            if (text.trim()) {
               tokenCounters.bard.output += estimateTokens(text);
-              element.dataset.processed = 'true';
+              hasChanges = true;
+              markElementProcessed(element);
             }
           });
 
           // Check for generated images more specifically
-          // Gemini often uses specific classes or structures for generated images.
           const images = node.querySelectorAll('img.generated-image, [data-is-image-generation-output="true"] img');
           if (images.length > 0) {
             imageCounters.bard += images.length;
+            hasChanges = true;
           }
-
-          // Send update
-          sendUsageData('bard', {
-            queries: queryCounters.bard,
-            inputTokens: tokenCounters.bard.input,
-            outputTokens: tokenCounters.bard.output,
-            images: imageCounters.bard
-          });
         }
       });
     });
+    
+    // Only send update if there were actual changes
+    if (hasChanges) {
+      debouncedSendUsageData('bard', {
+        queries: queryCounters.bard,
+        inputTokens: tokenCounters.bard.input,
+        outputTokens: tokenCounters.bard.output,
+        images: imageCounters.bard
+      });
+    }
   });
 
   observer.observe(chatContainer, { childList: true, subtree: true });
@@ -216,29 +262,37 @@ const monitorCopilot = () => {
   if (!chatContainer) return;
 
   const observer = new MutationObserver((mutations) => {
+    let hasChanges = false;
+    
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
           // Check for user messages
-          const userMessages = node.querySelectorAll('[data-testid="user-message-bubble"], .user-message-bubble'); // More specific
+          const userMessages = node.querySelectorAll('[data-testid="user-message-bubble"], .user-message-bubble');
           
           userMessages.forEach((element) => {
+            if (isElementProcessed(element)) return;
+            
             const text = element.textContent || '';
-            if (text.trim() && !element.dataset.processed) {
+            if (text.trim()) {
               queryCounters.copilot++;
               tokenCounters.copilot.input += estimateTokens(text);
-              element.dataset.processed = 'true';
+              hasChanges = true;
+              markElementProcessed(element);
             }
           });
 
           // Check for responses
-          const responses = node.querySelectorAll('[data-testid="bot-message-bubble"], .bot-message-bubble'); // More specific
+          const responses = node.querySelectorAll('[data-testid="bot-message-bubble"], .bot-message-bubble');
                            
           responses.forEach((element) => {
+            if (isElementProcessed(element)) return;
+            
             const text = element.textContent || '';
-            if (text.trim() && !element.dataset.processed) {
+            if (text.trim()) {
               tokenCounters.copilot.output += estimateTokens(text);
-              element.dataset.processed = 'true';
+              hasChanges = true;
+              markElementProcessed(element);
             }
           });
 
@@ -246,18 +300,21 @@ const monitorCopilot = () => {
           const images = node.querySelectorAll('img[src*="bing.com/images/create"], img[alt*="DALL-E"]');
           if (images.length > 0) {
             imageCounters.copilot += images.length;
+            hasChanges = true;
           }
-
-          // Send update
-          sendUsageData('copilot', {
-            queries: queryCounters.copilot,
-            inputTokens: tokenCounters.copilot.input,
-            outputTokens: tokenCounters.copilot.output,
-            images: imageCounters.copilot
-          });
         }
       });
     });
+    
+    // Only send update if there were actual changes
+    if (hasChanges) {
+      debouncedSendUsageData('copilot', {
+        queries: queryCounters.copilot,
+        inputTokens: tokenCounters.copilot.input,
+        outputTokens: tokenCounters.copilot.output,
+        images: imageCounters.copilot
+      });
+    }
   });
 
   observer.observe(chatContainer, { childList: true, subtree: true });
@@ -272,7 +329,7 @@ const monitorFormSubmissions = () => {
     const inputs = form.querySelectorAll('input[type="text"], textarea, input[role="textbox"], div[contenteditable="true"]');
     
     inputs.forEach(input => {
-      const text = input.value || input.textContent || ''; // Get value for input, textContent for contenteditable
+      const text = input.value || input.textContent || '';
       if (text.trim()) {
         const hostname = window.location.hostname.toLowerCase();
         
@@ -292,27 +349,45 @@ const monitorFormSubmissions = () => {
           queryCounters.copilot++;
           tokenCounters.copilot.input += estimateTokens(text);
           sendUsageData('copilot', { queries: queryCounters.copilot, inputTokens: tokenCounters.copilot.input });
+        } else if (hostname.includes('perplexity.ai')) {
+          queryCounters.perplexity++;
+          tokenCounters.perplexity.input += estimateTokens(text);
+          sendUsageData('perplexity', { queries: queryCounters.perplexity, inputTokens: tokenCounters.perplexity.input });
+        } else if (hostname.includes('character.ai')) {
+          queryCounters.character++;
+          tokenCounters.character.input += estimateTokens(text);
+          sendUsageData('character', { queries: queryCounters.character, inputTokens: tokenCounters.character.input });
+        } else if (hostname.includes('huggingface.co/chat')) {
+          queryCounters.huggingface++;
+          tokenCounters.huggingface.input += estimateTokens(text);
+          sendUsageData('huggingface', { queries: queryCounters.huggingface, inputTokens: tokenCounters.huggingface.input });
         }
       }
     });
   });
 };
 
-// Check for URL changes (for SPAs)
-const urlChangeObserver = new MutationObserver(() => { // Renamed to avoid conflict
+// Check for URL changes (for SPAs) - but don't reset counters
+const urlChangeObserver = new MutationObserver(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
     // Clean up previous observers
     observers.forEach(obs => obs.disconnect());
     observers = [];
     
-    // Reset counters for the new page load
-    initializeCounters(); 
+    // Clear processed elements set for new page
+    processedElements.clear();
+    
+    // Clear debounce timers
+    Object.keys(debounceTimers).forEach(key => {
+      clearTimeout(debounceTimers[key]);
+    });
+    debounceTimers = {};
 
     // Restart monitoring after URL change
     setTimeout(() => {
       checkForAIToolUsage();
-    }, 500); // Reduced delay slightly
+    }, 500);
   }
 });
 
@@ -320,10 +395,9 @@ const urlChangeObserver = new MutationObserver(() => { // Renamed to avoid confl
 urlChangeObserver.observe(document.body, { 
   childList: true, 
   subtree: true,
-  attributes: true, // Watch for attribute changes like data-url or similar
-  attributeFilter: ['href', 'data-url'] // Optimize which attributes to watch if needed
+  attributes: true,
+  attributeFilter: ['href', 'data-url']
 });
-
 
 // Enhanced AI tool detection and monitoring setup
 function checkForAIToolUsage() {
@@ -352,12 +426,8 @@ function checkForAIToolUsage() {
     monitorCopilot();
     chrome.runtime.sendMessage({ action: 'toolDetected', tool: 'copilot', url: window.location.href });
   }
-  // Add more tools here as needed, using similar patterns
   // Perplexity AI
   else if (hostname.includes('perplexity.ai')) {
-      // Perplexity might not have traditional "queries" in the same way,
-      // but we can track searches.
-      // Look for search input and answer sections.
       const searchInput = document.querySelector('textarea[placeholder*="Ask"]');
       if (searchInput) {
           searchInput.addEventListener('keydown', (e) => {
@@ -372,20 +442,26 @@ function checkForAIToolUsage() {
           });
       }
 
-      const answerContainer = document.querySelector('.answer-box, .text-block'); // Common class for answers
+      const answerContainer = document.querySelector('.answer-box, .text-block');
       if (answerContainer) {
           const observer = new MutationObserver((mutations) => {
+              let hasChanges = false;
+              
               mutations.forEach(mutation => {
                   if (mutation.addedNodes.length > 0) {
                       mutation.addedNodes.forEach(node => {
-                          if (node.nodeType === Node.ELEMENT_NODE && node.textContent.trim() && !node.dataset.processed) {
+                          if (node.nodeType === Node.ELEMENT_NODE && node.textContent.trim() && !isElementProcessed(node)) {
                               tokenCounters.perplexity.output += estimateTokens(node.textContent);
-                              sendUsageData('perplexity', { outputTokens: tokenCounters.perplexity.output });
-                              node.dataset.processed = 'true';
+                              hasChanges = true;
+                              markElementProcessed(node);
                           }
                       });
                   }
               });
+              
+              if (hasChanges) {
+                  debouncedSendUsageData('perplexity', { outputTokens: tokenCounters.perplexity.output });
+              }
           });
           observer.observe(answerContainer, { childList: true, subtree: true });
           observers.push(observer);
@@ -397,36 +473,47 @@ function checkForAIToolUsage() {
       const chatContainer = document.querySelector('div.chat-feed-container');
       if (chatContainer) {
           const observer = new MutationObserver((mutations) => {
+              let hasChanges = false;
+              
               mutations.forEach(mutation => {
                   mutation.addedNodes.forEach(node => {
                       if (node.nodeType === Node.ELEMENT_NODE) {
                           // User messages
                           const userMessages = node.querySelectorAll('.ch-message-bubble.ch-message-user');
                           userMessages.forEach(msg => {
+                              if (isElementProcessed(msg)) return;
+                              
                               const text = msg.textContent || '';
-                              if (text.trim() && !msg.dataset.processed) {
+                              if (text.trim()) {
                                   queryCounters.character++;
                                   tokenCounters.character.input += estimateTokens(text);
-                                  msg.dataset.processed = 'true';
+                                  hasChanges = true;
+                                  markElementProcessed(msg);
                               }
                           });
                           // Character responses
                           const botMessages = node.querySelectorAll('.ch-message-bubble.ch-message-bot');
                           botMessages.forEach(msg => {
+                              if (isElementProcessed(msg)) return;
+                              
                               const text = msg.textContent || '';
-                              if (text.trim() && !msg.dataset.processed) {
+                              if (text.trim()) {
                                   tokenCounters.character.output += estimateTokens(text);
-                                  msg.dataset.processed = 'true';
+                                  hasChanges = true;
+                                  markElementProcessed(msg);
                               }
-                          });
-                          sendUsageData('character', {
-                              queries: queryCounters.character,
-                              inputTokens: tokenCounters.character.input,
-                              outputTokens: tokenCounters.character.output
                           });
                       }
                   });
               });
+              
+              if (hasChanges) {
+                  debouncedSendUsageData('character', {
+                      queries: queryCounters.character,
+                      inputTokens: tokenCounters.character.input,
+                      outputTokens: tokenCounters.character.output
+                  });
+              }
           });
           observer.observe(chatContainer, { childList: true, subtree: true });
           observers.push(observer);
@@ -438,36 +525,47 @@ function checkForAIToolUsage() {
       const chatContainer = document.querySelector('.chat-container, .dark\\:bg-gray-900');
       if (chatContainer) {
           const observer = new MutationObserver((mutations) => {
+              let hasChanges = false;
+              
               mutations.forEach(mutation => {
                   mutation.addedNodes.forEach(node => {
                       if (node.nodeType === Node.ELEMENT_NODE) {
                           // User and bot messages typically have distinct styling or attributes
                           const userMessages = node.querySelectorAll('.message-bubble.user, .user-message-container');
                           userMessages.forEach(msg => {
+                              if (isElementProcessed(msg)) return;
+                              
                               const text = msg.textContent || '';
-                              if (text.trim() && !msg.dataset.processed) {
+                              if (text.trim()) {
                                   queryCounters.huggingface++;
                                   tokenCounters.huggingface.input += estimateTokens(text);
-                                  msg.dataset.processed = 'true';
+                                  hasChanges = true;
+                                  markElementProcessed(msg);
                               }
                           });
 
                           const botMessages = node.querySelectorAll('.message-bubble.bot, .bot-message-container');
                           botMessages.forEach(msg => {
+                              if (isElementProcessed(msg)) return;
+                              
                               const text = msg.textContent || '';
-                              if (text.trim() && !msg.dataset.processed) {
+                              if (text.trim()) {
                                   tokenCounters.huggingface.output += estimateTokens(text);
-                                  msg.dataset.processed = 'true';
+                                  hasChanges = true;
+                                  markElementProcessed(msg);
                               }
-                          });
-                          sendUsageData('huggingface', {
-                              queries: queryCounters.huggingface,
-                              inputTokens: tokenCounters.huggingface.input,
-                              outputTokens: tokenCounters.huggingface.output
                           });
                       }
                   });
               });
+              
+              if (hasChanges) {
+                  debouncedSendUsageData('huggingface', {
+                      queries: queryCounters.huggingface,
+                      inputTokens: tokenCounters.huggingface.input,
+                      outputTokens: tokenCounters.huggingface.output
+                  });
+              }
           });
           observer.observe(chatContainer, { childList: true, subtree: true });
           observers.push(observer);
@@ -483,5 +581,10 @@ monitorFormSubmissions();
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
   observers.forEach(obs => obs.disconnect());
-  urlChangeObserver.disconnect(); // Disconnect the URL change observer too
+  urlChangeObserver.disconnect();
+  
+  // Clear all debounce timers
+  Object.keys(debounceTimers).forEach(key => {
+    clearTimeout(debounceTimers[key]);
+  });
 });
