@@ -85,7 +85,7 @@ const monitorChatGPT = () => {
     return;
   }
 
-  console.log('ChatGPT: Chat container found:', chatContainer);
+  console.log('ChatGPT: Chat container found');
 
   const observer = new MutationObserver((mutations) => {
     let hasChanges = false;
@@ -103,8 +103,6 @@ const monitorChatGPT = () => {
                         element.getAttribute('data-testid')?.includes('assistant') ? 'assistant' : null;
             const text = element.textContent || '';
             
-            console.log('ChatGPT: Found message element:', { role, text: text.substring(0, 50), element });
-            
             // Only count user queries when the role is 'user'
             if (role === 'user' && text.trim()) {
               queryCounters.chatgpt++;
@@ -114,7 +112,6 @@ const monitorChatGPT = () => {
             } else if (role === 'assistant' && text.trim()) {
               tokenCounters.chatgpt.output += estimateTokens(text);
               hasChanges = true;
-              console.log('ChatGPT: Assistant response detected:', { tokens: tokenCounters.chatgpt.output });
             }
             
             markElementProcessed(element);
@@ -125,7 +122,6 @@ const monitorChatGPT = () => {
           if (images.length > 0) {
             imageCounters.chatgpt += images.length;
             hasChanges = true;
-            console.log('ChatGPT: Generated images detected:', { images: imageCounters.chatgpt });
           }
         }
       });
@@ -178,7 +174,7 @@ const monitorChatGPTFallback = () => {
               queryCounters.chatgpt++;
               tokenCounters.chatgpt.input += estimateTokens(text);
               hasChanges = true;
-              console.log('ChatGPT Fallback: User message detected:', { text: text.substring(0, 50), queries: queryCounters.chatgpt });
+              console.log('ChatGPT Fallback: User message detected:', { queries: queryCounters.chatgpt });
               markElementProcessed(element);
             }
           });
@@ -217,7 +213,7 @@ const monitorChatGPTFormSubmissions = () => {
         if (text.trim()) {
           queryCounters.chatgpt++;
           tokenCounters.chatgpt.input += estimateTokens(text);
-          console.log('ChatGPT Form: Query submitted:', { text: text.substring(0, 50), queries: queryCounters.chatgpt });
+          console.log('ChatGPT Form: Query submitted:', { queries: queryCounters.chatgpt });
           sendUsageData('chatgpt', { queries: queryCounters.chatgpt, inputTokens: tokenCounters.chatgpt.input });
         }
       }
@@ -225,7 +221,7 @@ const monitorChatGPTFormSubmissions = () => {
   }
   
   // Also monitor for Enter key presses in textareas
-  document.addEventListener('keydown', (event) => {
+  const handleKeydown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       const target = event.target;
       if (target.tagName === 'TEXTAREA' || target.getAttribute('contenteditable') === 'true') {
@@ -233,12 +229,19 @@ const monitorChatGPTFormSubmissions = () => {
         if (text.trim() && window.location.hostname.includes('chat.openai.com')) {
           queryCounters.chatgpt++;
           tokenCounters.chatgpt.input += estimateTokens(text);
-          console.log('ChatGPT Keydown: Query submitted:', { text: text.substring(0, 50), queries: queryCounters.chatgpt });
+          console.log('ChatGPT Keydown: Query submitted:', { queries: queryCounters.chatgpt });
           sendUsageData('chatgpt', { queries: queryCounters.chatgpt, inputTokens: tokenCounters.chatgpt.input });
         }
       }
     }
-  });
+  };
+  
+  document.addEventListener('keydown', handleKeydown);
+  
+  // Store the handler reference for cleanup
+  if (!window.chatgptKeydownHandler) {
+    window.chatgptKeydownHandler = handleKeydown;
+  }
 };
 
 // Claude specific monitoring
@@ -702,4 +705,10 @@ window.addEventListener('beforeunload', () => {
   Object.keys(debounceTimers).forEach(key => {
     clearTimeout(debounceTimers[key]);
   });
+
+  // Remove keydown handler if it exists
+  if (window.chatgptKeydownHandler) {
+    document.removeEventListener('keydown', window.chatgptKeydownHandler);
+    window.chatgptKeydownHandler = null;
+  }
 });

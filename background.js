@@ -111,7 +111,12 @@ function incrementVisit(toolKey) {
 
 // Update usage statistics from content script with incremental updates
 function updateUsageStats(toolKey, usageData) {
-  console.log(`Background: Received usage data for ${toolKey}:`, usageData);
+  console.log(`Background: Received usage data for ${toolKey}:`, {
+    queries: usageData.queries,
+    inputTokens: usageData.inputTokens,
+    outputTokens: usageData.outputTokens,
+    images: usageData.images
+  });
   
   chrome.storage.local.get(['aiUsageStats'], (result) => {
     const stats = result.aiUsageStats || {};
@@ -196,17 +201,11 @@ function updateUsageStats(toolKey, usageData) {
         if (stats[toolKey].sessions.length > 100) {
           stats[toolKey].sessions = stats[toolKey].sessions.slice(-100);
         }
-        console.log(`Background: Added new session for ${toolKey}:`, sessionData);
       }
     }
     
     chrome.storage.local.set({ aiUsageStats: stats }, () => {
-      console.log(`Background: Successfully saved stats for ${toolKey}:`, {
-        queries: stats[toolKey].queries,
-        inputTokens: stats[toolKey].inputTokens,
-        outputTokens: stats[toolKey].outputTokens,
-        images: stats[toolKey].images
-      });
+      console.log(`Background: Successfully saved stats for ${toolKey}`);
     });
     
     console.log(`AI Tool usage updated: ${AI_TOOLS[toolKey]?.name || toolKey}`, {
@@ -261,8 +260,6 @@ function getDailyStats(toolKey, days = 7) {
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Background: Received message:', request);
-  
   // Handle tool detection from content script
   if (request.action === 'toolDetected') {
     console.log(`AI Tool detected: ${request.tool} on ${request.url}`);
@@ -278,16 +275,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   // Handle requests from popup
   if (request.action === 'getStats') {
-    console.log('Background: Popup requested stats');
     chrome.storage.local.get(['aiUsageStats'], (result) => {
-      console.log('Background: Sending stats to popup:', result.aiUsageStats);
       sendResponse({ stats: result.aiUsageStats || {} });
     });
     return true; // Keep message channel open for async response
   }
   
   if (request.action === 'getDetailedStats') {
-    console.log('Background: Popup requested detailed stats');
     chrome.storage.local.get(['aiUsageStats'], async (result) => {
       const stats = result.aiUsageStats || {};
       const detailedStats = {};
@@ -303,7 +297,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         };
       }
       
-      console.log('Background: Sending detailed stats to popup:', detailedStats);
       sendResponse({ stats: detailedStats });
     });
     return true;
@@ -355,13 +348,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'getAITools') {
-    console.log('Background: Sending AI tools list');
     sendResponse({ tools: AI_TOOLS });
     return true;
   }
   
   if (request.action === 'exportData') {
-    console.log('Background: Exporting data');
     chrome.storage.local.get(['aiUsageStats'], (result) => {
       const exportData = {
         exportDate: new Date().toISOString(),
