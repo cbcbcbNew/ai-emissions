@@ -36,28 +36,57 @@ const debouncedSendUsageData = (tool, data) => {
   
   // Send immediate update for first query to ensure popup shows it right away
   if (data.queries === 1) {
-    sendUsageData(tool, data);
+    try {
+      sendUsageData(tool, data);
+    } catch (error) {
+      console.log('Error sending immediate update:', error);
+    }
   }
   
   debounceTimers[tool] = setTimeout(() => {
-    sendUsageData(tool, data);
+    try {
+      sendUsageData(tool, data);
+    } catch (error) {
+      console.log('Error sending debounced update:', error);
+    }
   }, 500); // Reduced from 1000ms to 500ms for faster updates
 };
 
 // Send usage data to background script
 const sendUsageData = (tool, data) => {
-  chrome.runtime.sendMessage({
-    action: 'usageTracked',
-    tool: tool,
-    data: {
-      queries: data.queries || 0,
-      inputTokens: data.inputTokens || 0,
-      outputTokens: data.outputTokens || 0,
-      images: data.images || 0,
-      timestamp: Date.now(),
-      url: window.location.href
+  try {
+    // Check if the extension context is still valid
+    if (chrome.runtime && chrome.runtime.id) {
+      chrome.runtime.sendMessage({
+        action: 'usageTracked',
+        tool: tool,
+        data: {
+          queries: data.queries || 0,
+          inputTokens: data.inputTokens || 0,
+          outputTokens: data.outputTokens || 0,
+          images: data.images || 0,
+          timestamp: Date.now(),
+          url: window.location.href
+        }
+      }).catch(error => {
+        // Handle extension context errors gracefully
+        if (error.message.includes('Extension context invalidated')) {
+          console.log('Extension context invalidated, skipping usage update');
+        } else {
+          console.error('Error sending usage data:', error);
+        }
+      });
+    } else {
+      console.log('Extension context not available, skipping usage update');
     }
-  });
+  } catch (error) {
+    // Handle any other errors gracefully
+    if (error.message.includes('Extension context invalidated')) {
+      console.log('Extension context invalidated, skipping usage update');
+    } else {
+      console.error('Error in sendUsageData:', error);
+    }
+  }
 };
 
 // Helper function to check if element was already processed
@@ -70,6 +99,46 @@ const markElementProcessed = (element) => {
   processedElements.add(element);
   element.dataset.processed = 'true';
 };
+
+// Helper function to check if extension context is valid
+const isExtensionValid = () => {
+  try {
+    return chrome.runtime && chrome.runtime.id;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Function to reinitialize monitoring if extension context is lost
+const reinitializeIfNeeded = () => {
+  if (!isExtensionValid()) {
+    console.log('Extension context lost, attempting to reinitialize...');
+    // Clear existing observers
+    observers.forEach(obs => obs.disconnect());
+    observers = [];
+    
+    // Clear processed elements
+    processedElements.clear();
+    
+    // Clear debounce timers
+    Object.keys(debounceTimers).forEach(key => {
+      clearTimeout(debounceTimers[key]);
+    });
+    debounceTimers = {};
+    
+    // Wait a moment then reinitialize
+    setTimeout(() => {
+      if (isExtensionValid()) {
+        console.log('Reinitializing monitoring...');
+        checkForAIToolUsage();
+        monitorFormSubmissions();
+      }
+    }, 1000);
+  }
+};
+
+// Check extension validity periodically
+setInterval(reinitializeIfNeeded, 5000);
 
 // ChatGPT specific monitoring
 const monitorChatGPT = () => {
