@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Event listeners
     document.getElementById('refreshBtn').addEventListener('click', loadStats);
     document.getElementById('resetBtn').addEventListener('click', resetStats);
+    document.getElementById('exportBtn').addEventListener('click', exportStats);
     
     // Listen for storage changes to auto-refresh the popup
     chrome.storage.onChanged.addListener((changes, namespace) => {
