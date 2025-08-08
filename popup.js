@@ -89,13 +89,13 @@ function displayStats(tools, stats) {
         return acc;
     }, { visits: 0, queries: 0, inputTokens: 0, outputTokens: 0, images: 0 });
     
-    // Always display total queries as the main total
-    totalCountEl.textContent = `${totals.queries} queries`;
-    
-    // Calculate carbon intensity: total tokens * 0.09 grams CO2
+    // Always display carbon intensity as the main total
     const totalTokens = totals.inputTokens + totals.outputTokens;
     const carbonIntensity = totalTokens * 0.09;
     carbonIntensityEl.textContent = `${carbonIntensity.toFixed(2)} g CO₂`;
+    
+    // Display queries as secondary info
+    totalCountEl.textContent = `${totals.queries} queries`;
     
     // Clear existing stats
     statsContainer.innerHTML = '';
