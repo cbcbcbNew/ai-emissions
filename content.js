@@ -533,7 +533,7 @@ const monitorFormSubmissions = () => {
           queryCounters.claude++;
           tokenCounters.claude.input += estimateTokens(text);
           sendUsageData('claude', { queries: queryCounters.claude, inputTokens: tokenCounters.claude.input });
-        } else if (hostname.includes('bard.google.com') || hostname.includes('gemini.google.com')) {
+        } else if (hostname.includes('gemini.google.com')) {
           queryCounters.gemini++;
           tokenCounters.gemini.input += estimateTokens(text);
           sendUsageData('gemini', { queries: queryCounters.gemini, inputTokens: tokenCounters.gemini.input });
@@ -608,7 +608,7 @@ function checkForAIToolUsage() {
   }
   
   // Gemini
-  else if (hostname.includes('bard.google.com') || hostname.includes('gemini.google.com')) {
+  else if (hostname.includes('gemini.google.com')) {
     monitorGemini();
     chrome.runtime.sendMessage({ action: 'toolDetected', tool: 'gemini', url: window.location.href });
   }

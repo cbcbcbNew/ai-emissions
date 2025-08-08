@@ -12,7 +12,7 @@ const AI_TOOLS = {
   },
   'gemini': {
     name: 'Gemini',
-    patterns: ['bard.google.com', 'gemini.google.com']
+    patterns: ['gemini.google.com']
   },
   'copilot': {
     name: 'Copilot',
