@@ -10,8 +10,8 @@ const AI_TOOLS = {
     name: 'Claude',
     patterns: ['claude.ai']
   },
-  'bard': {
-    name: 'Bard/Gemini',
+  'gemini': {
+    name: 'Gemini',
     patterns: ['bard.google.com', 'gemini.google.com']
   },
   'copilot': {

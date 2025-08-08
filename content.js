@@ -11,7 +11,7 @@ let debounceTimers = {}; // Debounce usage data sending
 
 // Initialize counters for each tool
 const initializeCounters = () => {
-  const tools = ['chatgpt', 'claude', 'bard', 'copilot', 'perplexity', 'character', 'huggingface'];
+  const tools = ['chatgpt', 'claude', 'gemini', 'copilot', 'perplexity', 'character', 'huggingface'];
   tools.forEach(tool => {
     queryCounters[tool] = 0;
     tokenCounters[tool] = { input: 0, output: 0 };
@@ -377,8 +377,8 @@ const monitorClaude = () => {
   observers.push(observer);
 };
 
-// Bard/Gemini specific monitoring
-const monitorBard = () => {
+// Gemini specific monitoring
+const monitorGemini = () => {
   const chatContainer = document.querySelector('[data-test-id="conversation-container"]') ||
                        document.querySelector('.conversation-container') ||
                        document.querySelector('main');
@@ -399,8 +399,8 @@ const monitorBard = () => {
             
             const text = element.textContent || '';
             if (text.trim()) {
-              queryCounters.bard++;
-              tokenCounters.bard.input += estimateTokens(text);
+              queryCounters.gemini++;
+              tokenCounters.gemini.input += estimateTokens(text);
               hasChanges = true;
               markElementProcessed(element);
             }
@@ -414,7 +414,7 @@ const monitorBard = () => {
             
             const text = element.textContent || '';
             if (text.trim()) {
-              tokenCounters.bard.output += estimateTokens(text);
+              tokenCounters.gemini.output += estimateTokens(text);
               hasChanges = true;
               markElementProcessed(element);
             }
@@ -423,7 +423,7 @@ const monitorBard = () => {
           // Check for generated images more specifically
           const images = node.querySelectorAll('img.generated-image, [data-is-image-generation-output="true"] img');
           if (images.length > 0) {
-            imageCounters.bard += images.length;
+            imageCounters.gemini += images.length;
             hasChanges = true;
           }
         }
@@ -432,11 +432,11 @@ const monitorBard = () => {
     
     // Only send update if there were actual changes
     if (hasChanges) {
-      debouncedSendUsageData('bard', {
-        queries: queryCounters.bard,
-        inputTokens: tokenCounters.bard.input,
-        outputTokens: tokenCounters.bard.output,
-        images: imageCounters.bard
+      debouncedSendUsageData('gemini', {
+        queries: queryCounters.gemini,
+        inputTokens: tokenCounters.gemini.input,
+        outputTokens: tokenCounters.gemini.output,
+        images: imageCounters.gemini
       });
     }
   });
@@ -534,9 +534,9 @@ const monitorFormSubmissions = () => {
           tokenCounters.claude.input += estimateTokens(text);
           sendUsageData('claude', { queries: queryCounters.claude, inputTokens: tokenCounters.claude.input });
         } else if (hostname.includes('bard.google.com') || hostname.includes('gemini.google.com')) {
-          queryCounters.bard++;
-          tokenCounters.bard.input += estimateTokens(text);
-          sendUsageData('bard', { queries: queryCounters.bard, inputTokens: tokenCounters.bard.input });
+          queryCounters.gemini++;
+          tokenCounters.gemini.input += estimateTokens(text);
+          sendUsageData('gemini', { queries: queryCounters.gemini, inputTokens: tokenCounters.gemini.input });
         } else if (hostname.includes('copilot.microsoft.com') || hostname.includes('bing.com/chat')) {
           queryCounters.copilot++;
           tokenCounters.copilot.input += estimateTokens(text);
@@ -607,10 +607,10 @@ function checkForAIToolUsage() {
     chrome.runtime.sendMessage({ action: 'toolDetected', tool: 'claude', url: window.location.href });
   }
   
-  // Bard/Gemini
+  // Gemini
   else if (hostname.includes('bard.google.com') || hostname.includes('gemini.google.com')) {
-    monitorBard();
-    chrome.runtime.sendMessage({ action: 'toolDetected', tool: 'bard', url: window.location.href });
+    monitorGemini();
+    chrome.runtime.sendMessage({ action: 'toolDetected', tool: 'gemini', url: window.location.href });
   }
   
   // Copilot
