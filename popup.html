@@ -16,17 +16,33 @@
             color: #2c5530;
             overflow-y: auto;
             overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            perspective: 1000px;
         }
         
         .container {
             padding: 20px;
             height: 100%;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            transform: translateZ(0);
+            will-change: scroll-position;
+        }
+        
+        * {
+            box-sizing: border-box;
         }
         
         .header {
             text-align: center;
             margin-bottom: 20px;
+            position: sticky;
+            top: 0;
+            background: linear-gradient(135deg, #a8e6cf 0%, #7fcdcd 100%);
+            z-index: 10;
+            padding: 10px 0;
         }
         
         .header h1 {

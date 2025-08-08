@@ -379,11 +379,23 @@ const monitorClaude = () => {
 
 // Gemini specific monitoring
 const monitorGemini = () => {
+  console.log('Setting up Gemini monitoring...');
+  
   const chatContainer = document.querySelector('[data-test-id="conversation-container"]') ||
                        document.querySelector('.conversation-container') ||
-                       document.querySelector('main');
+                       document.querySelector('main') ||
+                       document.querySelector('[role="main"]') ||
+                       document.querySelector('.conversation-container') ||
+                       document.querySelector('.chat-container');
   
-  if (!chatContainer) return;
+  if (!chatContainer) {
+    console.log('Gemini: No chat container found, trying alternative approach...');
+    // Fallback: monitor the entire document for Gemini-specific elements
+    monitorGeminiFallback();
+    return;
+  }
+
+  console.log('Gemini: Chat container found');
 
   const observer = new MutationObserver((mutations) => {
     let hasChanges = false;
@@ -391,40 +403,47 @@ const monitorGemini = () => {
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          // Check for user queries
-          const userInputs = node.querySelectorAll('.user-query-text, [data-test-id="user-query-text"]');
+          // Check for user queries with multiple selector strategies
+          const userInputs = node.querySelectorAll('.user-query-text, [data-test-id="user-query-text"], [data-test-id*="user"], .user-message, [class*="user"]');
           
           userInputs.forEach((element) => {
             if (isElementProcessed(element)) return;
             
             const text = element.textContent || '';
+            console.log('Gemini: Found potential user input:', { text: text.substring(0, 50), element });
+            
             if (text.trim()) {
               queryCounters.gemini++;
               tokenCounters.gemini.input += estimateTokens(text);
               hasChanges = true;
+              console.log('Gemini: User query detected:', { queries: queryCounters.gemini, tokens: tokenCounters.gemini.input });
               markElementProcessed(element);
             }
           });
 
-          // Check for responses
-          const responses = node.querySelectorAll('.model-response-text, [data-test-id="model-response-text"]');
+          // Check for responses with multiple selector strategies
+          const responses = node.querySelectorAll('.model-response-text, [data-test-id="model-response-text"], [data-test-id*="assistant"], .assistant-message, [class*="assistant"]');
           
           responses.forEach((element) => {
             if (isElementProcessed(element)) return;
             
             const text = element.textContent || '';
+            console.log('Gemini: Found potential assistant response:', { text: text.substring(0, 50), element });
+            
             if (text.trim()) {
               tokenCounters.gemini.output += estimateTokens(text);
               hasChanges = true;
+              console.log('Gemini: Assistant response detected:', { tokens: tokenCounters.gemini.output });
               markElementProcessed(element);
             }
           });
 
           // Check for generated images more specifically
-          const images = node.querySelectorAll('img.generated-image, [data-is-image-generation-output="true"] img');
+          const images = node.querySelectorAll('img.generated-image, [data-is-image-generation-output="true"] img, img[alt*="generated"], img[src*="dalle"]');
           if (images.length > 0) {
             imageCounters.gemini += images.length;
             hasChanges = true;
+            console.log('Gemini: Generated images detected:', { images: imageCounters.gemini });
           }
         }
       });
@@ -432,6 +451,12 @@ const monitorGemini = () => {
     
     // Only send update if there were actual changes
     if (hasChanges) {
+      console.log('Gemini: Sending usage update:', {
+        queries: queryCounters.gemini,
+        inputTokens: tokenCounters.gemini.input,
+        outputTokens: tokenCounters.gemini.output,
+        images: imageCounters.gemini
+      });
       debouncedSendUsageData('gemini', {
         queries: queryCounters.gemini,
         inputTokens: tokenCounters.gemini.input,
@@ -443,6 +468,102 @@ const monitorGemini = () => {
 
   observer.observe(chatContainer, { childList: true, subtree: true });
   observers.push(observer);
+  
+  // Also monitor form submissions specifically for Gemini
+  monitorGeminiFormSubmissions();
+};
+
+// Fallback monitoring for Gemini
+const monitorGeminiFallback = () => {
+  console.log('Gemini: Using fallback monitoring...');
+  
+  // Monitor the entire document for any Gemini-related elements
+  const observer = new MutationObserver((mutations) => {
+    let hasChanges = false;
+    
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          // Look for any elements that might contain user messages
+          const potentialUserMessages = node.querySelectorAll('[data-test-id*="user"], [class*="user"], [class*="message"], [role="textbox"], textarea');
+          
+          potentialUserMessages.forEach((element) => {
+            if (isElementProcessed(element)) return;
+            
+            const text = element.textContent || '';
+            // Only count if it looks like a user message (not empty, not just whitespace)
+            if (text.trim() && text.length > 1 && !text.includes('Gemini') && !text.includes('Assistant')) {
+              queryCounters.gemini++;
+              tokenCounters.gemini.input += estimateTokens(text);
+              hasChanges = true;
+              console.log('Gemini Fallback: User message detected:', { text: text.substring(0, 50), queries: queryCounters.gemini });
+              markElementProcessed(element);
+            }
+          });
+        }
+      });
+    });
+    
+    if (hasChanges) {
+      debouncedSendUsageData('gemini', {
+        queries: queryCounters.gemini,
+        inputTokens: tokenCounters.gemini.input,
+        outputTokens: tokenCounters.gemini.output,
+        images: imageCounters.gemini
+      });
+    }
+  });
+  
+  observer.observe(document.body, { childList: true, subtree: true });
+  observers.push(observer);
+};
+
+// Monitor Gemini form submissions specifically
+const monitorGeminiFormSubmissions = () => {
+  // Monitor for the Gemini input form
+  const inputForm = document.querySelector('form[data-testid="send-button-form"]') ||
+                   document.querySelector('form[role="search"]') ||
+                   document.querySelector('form');
+  
+  if (inputForm) {
+    console.log('Gemini: Found input form, monitoring submissions...');
+    
+    inputForm.addEventListener('submit', (event) => {
+      const textarea = inputForm.querySelector('textarea, input[type="text"], [contenteditable="true"]');
+      if (textarea) {
+        const text = textarea.value || textarea.textContent || '';
+        if (text.trim()) {
+          queryCounters.gemini++;
+          tokenCounters.gemini.input += estimateTokens(text);
+          console.log('Gemini Form: Query submitted:', { queries: queryCounters.gemini });
+          sendUsageData('gemini', { queries: queryCounters.gemini, inputTokens: tokenCounters.gemini.input });
+        }
+      }
+    });
+  }
+  
+  // Also monitor for Enter key presses in textareas
+  const handleGeminiKeydown = (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      const target = event.target;
+      if (target.tagName === 'TEXTAREA' || target.getAttribute('contenteditable') === 'true') {
+        const text = target.value || target.textContent || '';
+        if (text.trim() && window.location.hostname.includes('gemini.google.com')) {
+          queryCounters.gemini++;
+          tokenCounters.gemini.input += estimateTokens(text);
+          console.log('Gemini Keydown: Query submitted:', { queries: queryCounters.gemini });
+          sendUsageData('gemini', { queries: queryCounters.gemini, inputTokens: tokenCounters.gemini.input });
+        }
+      }
+    }
+  };
+  
+  document.addEventListener('keydown', handleGeminiKeydown);
+  
+  // Store the handler reference for cleanup
+  if (!window.geminiKeydownHandler) {
+    window.geminiKeydownHandler = handleGeminiKeydown;
+  }
 };
 
 // Copilot specific monitoring
@@ -779,10 +900,15 @@ window.addEventListener('beforeunload', () => {
   Object.keys(debounceTimers).forEach(key => {
     clearTimeout(debounceTimers[key]);
   });
-
-  // Remove keydown handler if it exists
+  
+  // Remove keydown handlers if they exist
   if (window.chatgptKeydownHandler) {
     document.removeEventListener('keydown', window.chatgptKeydownHandler);
     window.chatgptKeydownHandler = null;
+  }
+  
+  if (window.geminiKeydownHandler) {
+    document.removeEventListener('keydown', window.geminiKeydownHandler);
+    window.geminiKeydownHandler = null;
   }
 });
