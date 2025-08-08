@@ -103,8 +103,8 @@ function displayStats(tools, stats) {
     if (totals.visits === 0 && totals.queries === 0) {
         statsContainer.innerHTML = `
             <div class="empty-state">
-                <h3>No AI tools used yet</h3>
-                <p>Start using AI chatbots to see your usage statistics here!</p>
+                <h3>No carbon footprint yet</h3>
+                <p>Start using AI tools to see your carbon impact here!</p>
             </div>
         `;
         return;
