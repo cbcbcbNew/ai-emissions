@@ -22,25 +22,6 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Popup: Periodic refresh check...');
         loadStats();
     }, 2000);
-    
-    // Add test button for debugging
-    const testButton = document.createElement('button');
-    testButton.textContent = 'Test Storage Update';
-    testButton.style.marginTop = '10px';
-    testButton.addEventListener('click', () => {
-        console.log('Popup: Test button clicked');
-        // Manually trigger a storage update to test the listener
-        chrome.storage.local.get(['aiUsageStats'], (result) => {
-            const stats = result.aiUsageStats || {};
-            if (stats.chatgpt) {
-                stats.chatgpt.queries = (stats.chatgpt.queries || 0) + 1;
-                chrome.storage.local.set({ aiUsageStats: stats }, () => {
-                    console.log('Popup: Test storage update completed');
-                });
-            }
-        });
-    });
-    document.body.appendChild(testButton);
 });
 
 // Load and display statistics
@@ -291,17 +272,32 @@ function resetStats() {
     }
 }
 
-// Export statistics
+// Export statistics as CSV
 function exportStats() {
     sendMessage({ action: 'exportData' })
         .then(response => {
-            const dataStr = JSON.stringify(response.data, null, 2);
-            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const data = response.data;
+            
+            // Create CSV content
+            let csvContent = 'Tool,Queries,Input Tokens,Output Tokens,Total Tokens,Images,First Used,Last Used,Carbon Intensity (g CO₂)\n';
+            
+            // Add data for each tool
+            Object.entries(data.stats).forEach(([toolKey, toolStats]) => {
+                const totalTokens = (toolStats.inputTokens || 0) + (toolStats.outputTokens || 0);
+                const carbonIntensity = totalTokens * 0.09;
+                const firstUsed = toolStats.firstUsed ? new Date(toolStats.firstUsed).toISOString().split('T')[0] : '';
+                const lastUsed = toolStats.lastUsed ? new Date(toolStats.lastUsed).toISOString().split('T')[0] : '';
+                
+                csvContent += `"${data.tools[toolKey]?.name || toolKey}",${toolStats.queries || 0},${toolStats.inputTokens || 0},${toolStats.outputTokens || 0},${totalTokens},${toolStats.images || 0},"${firstUsed}","${lastUsed}",${carbonIntensity.toFixed(2)}\n`;
+            });
+            
+            // Create downloadable file
+            const dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             
             // Create a downloadable link and click it
             const link = document.createElement('a');
             link.href = URL.createObjectURL(dataBlob);
-            link.download = `ai-usage-stats-${new Date().toISOString().split('T')[0]}.json`;
+            link.download = `ai-carbon-footprint-${new Date().toISOString().split('T')[0]}.csv`;
             
             // Append to body, click, and remove
             document.body.appendChild(link);
