@@ -77,6 +77,7 @@ function loadStats() {
 function displayStats(tools, stats) {
     const statsContainer = document.getElementById('statsContainer');
     const totalCountEl = document.getElementById('totalCount');
+    const carbonIntensityEl = document.getElementById('carbonIntensity');
     
     // Calculate totals across all tools
     const totals = Object.values(stats).reduce((acc, toolStats) => {
@@ -90,6 +91,11 @@ function displayStats(tools, stats) {
     
     // Always display total queries as the main total
     totalCountEl.textContent = `${totals.queries} queries`;
+    
+    // Calculate carbon intensity: total tokens * 0.09 grams CO2
+    const totalTokens = totals.inputTokens + totals.outputTokens;
+    const carbonIntensity = totalTokens * 0.09;
+    carbonIntensityEl.textContent = `${carbonIntensity.toFixed(2)} g CO₂`;
     
     // Clear existing stats
     statsContainer.innerHTML = '';
