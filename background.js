@@ -260,6 +260,8 @@ function getDailyStats(toolKey, days = 7) {
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Background: Received message:', request.action, request);
+  
   // Handle tool detection from content script
   if (request.action === 'toolDetected') {
     console.log(`AI Tool detected: ${request.tool} on ${request.url}`);
@@ -268,22 +270,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   // Handle usage tracking from content script
   if (request.action === 'usageTracked') {
-    console.log(`Background: Processing usage data for ${request.tool}`);
+    console.log(`Background: Processing usage data for ${request.tool}`, request.data);
     updateUsageStats(request.tool, request.data);
     return;
   }
   
   // Handle requests from popup
   if (request.action === 'getStats') {
+    console.log('Background: Popup requested stats');
     chrome.storage.local.get(['aiUsageStats'], (result) => {
+      console.log('Background: Current storage data:', result.aiUsageStats);
       sendResponse({ stats: result.aiUsageStats || {} });
     });
     return true; // Keep message channel open for async response
   }
   
   if (request.action === 'getDetailedStats') {
+    console.log('Background: Popup requested detailed stats');
     chrome.storage.local.get(['aiUsageStats'], async (result) => {
       const stats = result.aiUsageStats || {};
+      console.log('Background: Sending detailed stats to popup:', stats);
+      
       const detailedStats = {};
       
       for (const [toolKey, toolStats] of Object.entries(stats)) {
@@ -297,6 +304,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         };
       }
       
+      console.log('Background: Final detailed stats being sent:', detailedStats);
       sendResponse({ stats: detailedStats });
     });
     return true;
@@ -348,11 +356,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'getAITools') {
+    console.log('Background: Sending AI tools list');
     sendResponse({ tools: AI_TOOLS });
     return true;
   }
   
   if (request.action === 'exportData') {
+    console.log('Background: Exporting data');
     chrome.storage.local.get(['aiUsageStats'], (result) => {
       const exportData = {
         exportDate: new Date().toISOString(),

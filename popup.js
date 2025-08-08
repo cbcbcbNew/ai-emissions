@@ -10,11 +10,36 @@ document.addEventListener('DOMContentLoaded', function() {
     // Listen for storage changes to auto-refresh the popup
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace === 'local' && changes.aiUsageStats) {
-            console.log('Popup: Storage changed, refreshing stats...');
+            console.log('Popup: Storage changed, refreshing stats...', changes.aiUsageStats);
             // Small delay to ensure the storage update is complete
             setTimeout(loadStats, 100);
         }
     });
+    
+    // Periodic refresh as fallback (every 2 seconds)
+    setInterval(() => {
+        console.log('Popup: Periodic refresh check...');
+        loadStats();
+    }, 2000);
+    
+    // Add test button for debugging
+    const testButton = document.createElement('button');
+    testButton.textContent = 'Test Storage Update';
+    testButton.style.marginTop = '10px';
+    testButton.addEventListener('click', () => {
+        console.log('Popup: Test button clicked');
+        // Manually trigger a storage update to test the listener
+        chrome.storage.local.get(['aiUsageStats'], (result) => {
+            const stats = result.aiUsageStats || {};
+            if (stats.chatgpt) {
+                stats.chatgpt.queries = (stats.chatgpt.queries || 0) + 1;
+                chrome.storage.local.set({ aiUsageStats: stats }, () => {
+                    console.log('Popup: Test storage update completed');
+                });
+            }
+        });
+    });
+    document.body.appendChild(testButton);
 });
 
 // Load and display statistics
